@@ -52,9 +52,17 @@ def search_product_reviews(product_name):
 
 async def get_clean_text(urls):
     combined_text = ""
+    # We add browser_config to ensure it runs on a server without a monitor
     async with AsyncWebCrawler(verbose=False) as crawler:
         for url in urls:
-            result = await crawler.arun(url=url)
+            # Add headless=True and the fix for Linux sandboxing
+            result = await crawler.arun(
+                url=url,
+                browser_cfg={
+                    "headless": True,
+                    "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+                }
+            )
             combined_text += result.markdown[:4000]
     return combined_text
 
