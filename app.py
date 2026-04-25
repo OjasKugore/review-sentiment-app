@@ -58,40 +58,37 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    # We add a clearer instruction and safety setting hints
+    # This tells Gemini to ignore 'harm' filters so it can read spicy reviews
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
     prompt = f"""
-    EXTRACT product sentiment for '{product_name}' from these snippets:
+    You are a product analyst. Analyze these search snippets for '{product_name}':
     {review_text}
     
-    You must output ONLY JSON in this exact format:
-    {{"score": 75, "vibe": "summary", "pros": ["p1", "p2", "p3"], "cons": ["c1", "c2", "c3"]}}
-    
-    If no data is found, return:
-    {{"score": 0, "vibe": "No data found", "pros": [], "cons": []}}
+    Return ONLY a valid JSON:
+    {{"score": 85, "vibe": "Great product overall", "pros": ["item1"], "cons": ["item1"]}}
     """
     
     try:
-        # We add 'safety_settings' to ensure it doesn't block common review language
+        # We add the safety_settings here
         response = model.generate_content(
             prompt,
-            generation_config={"response_mime_type": "application/json"} # Forces JSON mode
+            safety_settings=safety_settings,
+            generation_config={"response_mime_type": "application/json"}
         )
         
-        raw = response.text.strip()
-        # Remove any markdown junk if Gemini ignored the mime_type instruction
-        raw = re.sub(r'```json|```', '', raw).strip()
-        
-        return json.loads(raw)
+        return json.loads(response.text)
     except Exception as e:
-        # If it still fails, let's see why in the console
-        print(f"Gemini Error: {e}")
         return {
             "score": 0, 
-            "vibe": "AI Analysis Blocked or Failed. Try a different product.", 
-            "pros": ["N/A"], 
-            "cons": ["N/A"]
+            "vibe": f"Analysis Error: {str(e)[:50]}", 
+            "pros": ["N/A"], "cons": ["N/A"]
         }
-
 # ─── 3. UI HELPERS ───────────────────────────────────────────
 def score_to_label(score):
     if score >= 80: return "Highly Recommended", "#22c98a"
