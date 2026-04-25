@@ -13,13 +13,22 @@ import plotly.graph_objects as go
 # ─── 1. SETUP LOGIC (Must come first) ────────────────────────
 @st.cache_resource
 def power_on_browser():
+    # 1. Check if we've already done this to save time
     if not os.path.exists("browser_installed.txt"):
-        # We only download the browser files, we let packages.txt handle the OS
-        subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
-        with open("browser_installed.txt", "w") as f:
-            f.write("done")
+        try:
+            # 2. Force install the playwright library first
+            subprocess.run(["pip", "install", "playwright"], check=True)
+            
+            # 3. Install the actual Chromium browser
+            subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+            
+            with open("browser_installed.txt", "w") as f:
+                f.write("done")
+        except subprocess.CalledProcessError as e:
+            st.error(f"Installation failed: {e}")
+            # If it fails, we try a fallback command
+            os.system("python -m playwright install chromium")
 
-# Run the setup
 power_on_browser()
 
 # ─── 2. CONFIGURATION ────────────────────────────────────────
