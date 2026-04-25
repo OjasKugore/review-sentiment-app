@@ -129,6 +129,9 @@ analyze_btn = st.button("Run Intelligence Check →")
 if analyze_btn and product_query:
     with st.spinner("🕵️ Scouring the web..."):
         data = get_reviews_data(product_query)
+
+    if data:
+        st.write(f"DEBUG: Found {len(data)} characters of data.")
     
     if data:
         with st.spinner("🤖 Quantifying sentiment..."):
