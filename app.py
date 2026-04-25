@@ -19,7 +19,7 @@ if GEMINI_API_KEY:
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
     except:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ─── 2. CORE LOGIC ───────────────────────────────────────────
 def get_reviews_data(product_name):
