@@ -50,27 +50,33 @@ def search_product_reviews(product_name):
     response = requests.post(url, headers=headers, json=payload)
     return [item['link'] for item in response.json().get('organic', [])]
 
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
 async def get_clean_text(urls):
     combined_text = ""
-    # We define strict browser settings to prevent the 'TargetClosed' crash
-    async with AsyncWebCrawler(verbose=False) as crawler:
+    
+    # 1. Configure the browser for low-memory cloud environments
+    browser_cfg = BrowserConfig(
+        headless=True,
+        browser_type="chromium",
+        extra_args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",  # Crucial: uses RAM instead of shared memory
+            "--disable-gpu",            # No GPU on Streamlit servers
+            "--single-process",         # Uses significantly less RAM
+        ]
+    )
+    
+    # 2. Configure the run settings
+    run_cfg = CrawlerRunConfig(cache_mode="bypass")
+
+    async with AsyncWebCrawler(config=browser_cfg) as crawler:
         for url in urls:
-            result = await crawler.arun(
-                url=url,
-                # These settings are essential for low-memory cloud servers
-                browser_cfg={
-                    "headless": True,
-                    "args": [
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage", # Prevents memory crashes
-                        "--disable-gpu",           # Server doesn't have a GPU
-                        "--no-zygote",             # Reduces process overhead
-                        "--single-process"         # Uses less RAM
-                    ]
-                }
-            )
-            combined_text += result.markdown[:4000]
+            result = await crawler.arun(url=url, config=run_cfg)
+            if result.success:
+                combined_text += result.markdown[:4000]
+                
     return combined_text
 
 def analyze_sentiment(review_text, product_name):
