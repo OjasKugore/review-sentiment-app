@@ -1,5 +1,0 @@
-libnss3
-libgbm1
-libasound2
-libnss3-dev
-libxkbcommon0
