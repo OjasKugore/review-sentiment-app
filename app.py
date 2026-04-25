@@ -1,6 +1,21 @@
-import streamlit as st
-import requests
 import os
+import subprocess
+import streamlit as st
+
+# --- CLOUD SETUP FOR PLAYWRIGHT ---
+@st.cache_resource
+def install_playwright_browsers():
+    try:
+        # Check if chromium is already installed to save time
+        subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+        subprocess.run(["python", "-m", "playwright", "install-deps"], check=True)
+    except Exception as e:
+        st.error(f"Error installing browser: {e}")
+
+# Only run this once per session
+install_playwright_browsers()
+import requests
+
 import asyncio
 import json
 from dotenv import load_dotenv
