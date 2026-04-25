@@ -58,29 +58,39 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    """Uses Gemini to turn search snippets into structured JSON."""
+    # We add a clearer instruction and safety setting hints
     prompt = f"""
-    Analyze the sentiment for '{product_name}' based on these search snippets:
+    EXTRACT product sentiment for '{product_name}' from these snippets:
     {review_text}
     
-    Return ONLY a valid JSON object:
-    {{
-        "score": 0-100,
-        "vibe": "One sentence summary",
-        "pros": ["3 short pros"],
-        "cons": ["3 short cons"]
-    }}
+    You must output ONLY JSON in this exact format:
+    {{"score": 75, "vibe": "summary", "pros": ["p1", "p2", "p3"], "cons": ["c1", "c2", "c3"]}}
+    
+    If no data is found, return:
+    {{"score": 0, "vibe": "No data found", "pros": [], "cons": []}}
     """
+    
     try:
-        response = model.generate_content(prompt)
-        raw = response.text
-        # Clean markdown formatting
+        # We add 'safety_settings' to ensure it doesn't block common review language
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"} # Forces JSON mode
+        )
+        
+        raw = response.text.strip()
+        # Remove any markdown junk if Gemini ignored the mime_type instruction
         raw = re.sub(r'```json|```', '', raw).strip()
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
+        
+        return json.loads(raw)
     except Exception as e:
-        return {"score": 50, "vibe": "Analysis failed.", "pros": ["N/A"], "cons": ["N/A"]}
+        # If it still fails, let's see why in the console
+        print(f"Gemini Error: {e}")
+        return {
+            "score": 0, 
+            "vibe": "AI Analysis Blocked or Failed. Try a different product.", 
+            "pros": ["N/A"], 
+            "cons": ["N/A"]
+        }
 
 # ─── 3. UI HELPERS ───────────────────────────────────────────
 def score_to_label(score):
