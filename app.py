@@ -52,15 +52,22 @@ def search_product_reviews(product_name):
 
 async def get_clean_text(urls):
     combined_text = ""
-    # We add browser_config to ensure it runs on a server without a monitor
+    # We define strict browser settings to prevent the 'TargetClosed' crash
     async with AsyncWebCrawler(verbose=False) as crawler:
         for url in urls:
-            # Add headless=True and the fix for Linux sandboxing
             result = await crawler.arun(
                 url=url,
+                # These settings are essential for low-memory cloud servers
                 browser_cfg={
                     "headless": True,
-                    "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage", # Prevents memory crashes
+                        "--disable-gpu",           # Server doesn't have a GPU
+                        "--no-zygote",             # Reduces process overhead
+                        "--single-process"         # Uses less RAM
+                    ]
                 }
             )
             combined_text += result.markdown[:4000]
