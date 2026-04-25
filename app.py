@@ -54,29 +54,24 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 
 async def get_clean_text(urls):
     combined_text = ""
-    
-    # 1. Configure the browser for low-memory cloud environments
-    browser_cfg = BrowserConfig(
-        headless=True,
-        browser_type="chromium",
-        extra_args=[
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",  # Crucial: uses RAM instead of shared memory
-            "--disable-gpu",            # No GPU on Streamlit servers
-            "--single-process",         # Uses significantly less RAM
-        ]
-    )
-    
-    # 2. Configure the run settings
-    run_cfg = CrawlerRunConfig(cache_mode="bypass")
-
-    async with AsyncWebCrawler(config=browser_cfg) as crawler:
+    async with AsyncWebCrawler(verbose=False) as crawler:
         for url in urls:
-            result = await crawler.arun(url=url, config=run_cfg)
-            if result.success:
+            # We bypass the complex config objects and pass raw launch_args
+            result = await crawler.arun(
+                url=url,
+                launch_config={
+                    "headless": True,
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--single-process"
+                    ]
+                }
+            )
+            if result and result.markdown:
                 combined_text += result.markdown[:4000]
-                
     return combined_text
 
 def analyze_sentiment(review_text, product_name):
