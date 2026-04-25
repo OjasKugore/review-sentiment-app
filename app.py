@@ -12,16 +12,12 @@ import plotly.graph_objects as go
 
 # ─── 1. SETUP LOGIC (Must come first) ────────────────────────
 @st.cache_resource
-
 def power_on_browser():
     if not os.path.exists("browser_installed.txt"):
-        try:
-            # We ONLY install the browser binaries, NOT the system deps
-            subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
-            with open("browser_installed.txt", "w") as f:
-                f.write("done")
-        except Exception as e:
-            st.error(f"Browser Setup Failed: {e}")
+        # We only download the browser files, we let packages.txt handle the OS
+        subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+        with open("browser_installed.txt", "w") as f:
+            f.write("done")
 
 # Run the setup
 power_on_browser()
