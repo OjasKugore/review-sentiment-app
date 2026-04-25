@@ -139,7 +139,7 @@ if analyze_btn and product_query:
             score = analysis.get('score', 50)
             label, color = score_to_label(score)
             
-            st.plotly_chart(build_gauge(score), use_container_width=True)
+            st.plotly_chart(build_gauge(score), width='stretch')
             
             st.markdown(f"""
             <div class="card">
