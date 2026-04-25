@@ -12,14 +12,12 @@ import plotly.graph_objects as go
 
 # ─── 1. SETUP LOGIC (Must come first) ────────────────────────
 @st.cache_resource
+
 def power_on_browser():
-    """Runs the installation once and creates a flag file."""
     if not os.path.exists("browser_installed.txt"):
         try:
-            # Install playwright and browsers
-            subprocess.run(["pip", "install", "playwright"], check=True)
+            # We ONLY install the browser binaries, NOT the system deps
             subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
-            subprocess.run(["python", "-m", "playwright", "install-deps"], check=True)
             with open("browser_installed.txt", "w") as f:
                 f.write("done")
         except Exception as e:
