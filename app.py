@@ -56,17 +56,18 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    """Uses Gemini 1.5 Flash (highest quota) to analyze sentiment."""
+    
     if not GEMINI_API_KEY:
         st.error("Gemini API Key missing!")
         return None
 
     genai.configure(api_key=GEMINI_API_KEY)
-    # Try the most modern stable version first, fallback if the library is older
+    
+    # Using the 2.0 model which is standard in 2026
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.0-flash')
     except:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
     # Safety settings to prevent "Blocked" errors from spicy reviews
     safety_settings = [
