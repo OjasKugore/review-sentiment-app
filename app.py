@@ -7,27 +7,25 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import plotly.graph_objects as go
 
-# ─── 1. CONFIGURATION ────────────────────────────────────────
+# ─── 1. CONFIGURATION & KEYS ──────────────────────────────────
 load_dotenv()
 
-# Securely get API keys (works for local .env or Streamlit Cloud Secrets)
+# Securely fetch keys from Streamlit Secrets or Local .env
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-    except:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+# ─── 2. CORE LOGIC ────────────────────────────────────────────
 
-# ─── 2. CORE LOGIC ───────────────────────────────────────────
 def get_reviews_data(product_name):
-    """Fetches text data using Serper API without needing a browser."""
+    """Fetches text data using Serper API (Browserless)."""
+    if not SERPER_API_KEY:
+        st.error("Serper API Key missing!")
+        return None
+
     url = "https://google.serper.dev/search"
     payload = {
         "q": f"{product_name} user reviews pros cons reddit amazon",
-        "num": 10,
+        "num": 8,
         "gl": "us",
         "autocorrect": True
     }
@@ -37,7 +35,7 @@ def get_reviews_data(product_name):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         results = response.json()
         
@@ -58,7 +56,15 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    # This tells Gemini to ignore 'harm' filters so it can read spicy reviews
+    """Uses Gemini 1.5 Flash (highest quota) to analyze sentiment."""
+    if not GEMINI_API_KEY:
+        st.error("Gemini API Key missing!")
+        return None
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+
+    # Safety settings to prevent "Blocked" errors from spicy reviews
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -67,15 +73,19 @@ def analyze_sentiment(review_text, product_name):
     ]
 
     prompt = f"""
-    You are a product analyst. Analyze these search snippets for '{product_name}':
+    Analyze product sentiment for '{product_name}' using these search snippets:
     {review_text}
     
-    Return ONLY a valid JSON:
-    {{"score": 85, "vibe": "Great product overall", "pros": ["item1"], "cons": ["item1"]}}
+    You MUST return ONLY a valid JSON object:
+    {{
+        "score": 0-100,
+        "vibe": "One sentence summary of the general feeling",
+        "pros": ["pro1", "pro2", "pro3"],
+        "cons": ["con1", "con2", "con3"]
+    }}
     """
     
     try:
-        # We add the safety_settings here
         response = model.generate_content(
             prompt,
             safety_settings=safety_settings,
@@ -84,12 +94,11 @@ def analyze_sentiment(review_text, product_name):
         
         return json.loads(response.text)
     except Exception as e:
-        return {
-            "score": 0, 
-            "vibe": f"Analysis Error: {str(e)[:50]}", 
-            "pros": ["N/A"], "cons": ["N/A"]
-        }
-# ─── 3. UI HELPERS ───────────────────────────────────────────
+        st.error(f"AI Analysis Error: {e}")
+        return None
+
+# ─── 3. UI HELPERS ────────────────────────────────────────────
+
 def score_to_label(score):
     if score >= 80: return "Highly Recommended", "#22c98a"
     if score >= 65: return "Worth Buying",        "#5bc8a8"
@@ -102,22 +111,27 @@ def build_gauge(score):
         mode="gauge+number",
         value=score,
         number={"font": {"color": accent, "size": 50}},
-        gauge={"axis": {"range": [0, 100]}, "bar": {"color": accent}}
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": accent},
+            "bgcolor": "rgba(255,255,255,0.05)"
+        }
     ))
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", height=250, margin=dict(t=0, b=0))
     return fig
 
-# ─── 4. CSS & LAYOUT ─────────────────────────────────────────
-st.set_page_config(page_title="Vibe Check", page_icon="🛡️", layout="centered")
+# ─── 4. STREAMLIT UI ──────────────────────────────────────────
 
+st.set_page_config(page_title="Vibe Check", page_icon="🛡️")
+
+# Custom CSS for the dark "VibeCheck" look
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&display=swap');
     html, body, [data-testid="stAppViewContainer"] { background: #0b0e1a !important; font-family: 'IBM Plex Sans', sans-serif; }
     .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-    .stTextInput input { background: #1a1f35 !important; color: white !important; border: 1px solid #30364d !important; }
     h1, h2, h3, p, span, label { color: white !important; }
-    .app-header { font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; border-bottom: 2px solid #f0a500; }
+    .app-header { font-size: 2.5rem; font-weight: 700; border-bottom: 2px solid #f0a500; margin-bottom: 2rem; }
     .app-header em { color: #f0a500; font-style: italic; }
 </style>
 <div class="app-header">Vibe<em>Check</em></div>
@@ -127,33 +141,43 @@ product_query = st.text_input("Product Name", placeholder="e.g. Sony WH-1000XM5"
 analyze_btn = st.button("Run Intelligence Check →")
 
 if analyze_btn and product_query:
-    with st.spinner("🕵️ Scouring the web..."):
-        data = get_reviews_data(product_query)
-
-    if data:
-        st.write(f"DEBUG: Found {len(data)} characters of data.")
+    # Use a clear container for status
+    status_container = st.empty()
+    
+    status_container.info("🕵️ Scouring the web...")
+    data = get_reviews_data(product_query)
     
     if data:
-        with st.spinner("🤖 Quantifying sentiment..."):
-            analysis = analyze_sentiment(data, product_query)
+        # Show debug info to verify data flow
+        st.write(f"📊 Signal Strength: {len(data)} characters found.")
+        
+        status_container.info("🤖 Quantifying sentiment...")
+        analysis = analyze_sentiment(data, product_query)
+        
+        if analysis:
+            status_container.empty() # Clear status
+            
             score = analysis.get('score', 50)
             label, color = score_to_label(score)
             
+            # Display Gauge
             st.plotly_chart(build_gauge(score), width='stretch')
             
+            # Display Summary Card
             st.markdown(f"""
             <div class="card">
                 <h2 style="color:{color} !important; margin-top:0;">{label}</h2>
-                <p style="font-size: 1.1rem; line-height: 1.5;">{analysis.get('vibe', '')}</p>
+                <p style="font-size: 1.1rem;">{analysis.get('vibe', '')}</p>
             </div>
             """, unsafe_allow_html=True)
             
-            c1, c2 = st.columns(2)
-            with c1:
+            # Display Pros/Cons
+            col1, col2 = st.columns(2)
+            with col1:
                 st.markdown("### ✅ Strengths")
                 for p in analysis.get('pros', []): st.write(f"▲ {p}")
-            with c2:
+            with col2:
                 st.markdown("### ❌ Weaknesses")
                 for c in analysis.get('cons', []): st.write(f"▼ {c}")
     else:
-        st.error("No data found. Check your API key or try a more common product name.")
+        status_container.error("No search data found. Check your Serper API Key.")
