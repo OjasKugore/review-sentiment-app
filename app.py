@@ -58,14 +58,18 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    """Uses Gemini 1.5 Flash with Retry Logic for Quota Errors."""
     if not GEMINI_API_KEY:
         st.error("Gemini API Key missing!")
         return None
 
     genai.configure(api_key=GEMINI_API_KEY)
-    # Using 1.5-flash as it has a more stable free-tier quota on Streamlit
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # Updated for 2026 Stable API
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+    except Exception:
+        # Fallback to the auto-updating alias if the specific version is busy
+        model = genai.GenerativeModel('gemini-flash-latest')
 
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -74,19 +78,8 @@ def analyze_sentiment(review_text, product_name):
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
 
-    prompt = f"""
-    Analyze product sentiment for '{product_name}' using these search snippets:
-    {review_text}
-    
-    You MUST return ONLY a valid JSON object:
-    {{
-        "score": 0-100,
-        "vibe": "One sentence summary of the general feeling",
-        "pros": ["pro1", "pro2", "pro3"],
-        "cons": ["con1", "con2", "con3"]
-    }}
-    """
-    
+    prompt = f"Analyze sentiment for {product_name}: {review_text}. Return ONLY JSON."
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -98,17 +91,10 @@ def analyze_sentiment(review_text, product_name):
             return json.loads(response.text)
         
         except Exception as e:
-            err_str = str(e)
-            if "429" in err_str:
-                if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 12 # 12s, 24s...
-                    st.warning(f"Quota busy. Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    st.error("Quota fully exhausted for now. Please wait a few minutes.")
-            else:
-                st.error(f"AI Error: {err_str}")
+            if "429" in str(e):
+                time.sleep((attempt + 1) * 10)
+                continue
+            st.error(f"AI Error: {e}")
             return None
 
 # ─── 3. UI HELPERS ────────────────────────────────────────────
