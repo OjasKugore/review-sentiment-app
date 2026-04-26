@@ -62,7 +62,11 @@ def analyze_sentiment(review_text, product_name):
         return None
 
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # Try the most modern stable version first, fallback if the library is older
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    except:
+        model = genai.GenerativeModel('gemini-pro')
 
     # Safety settings to prevent "Blocked" errors from spicy reviews
     safety_settings = [
