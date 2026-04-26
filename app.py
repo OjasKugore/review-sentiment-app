@@ -77,15 +77,24 @@ def analyze_sentiment(review_text, product_name):
     ]
 
     prompt = f"""
-    Analyze product sentiment for '{product_name}' using this text:
+    ROLE: You are a Senior Product Strategist and Market Analyst.
+    TASK: Provide a deep-dive sentiment analysis for '{product_name}' based on the following web data:
+    
+    DATA:
     {review_text}
     
-    Return ONLY a valid JSON object:
+    INSTRUCTIONS:
+    1. Summarize the 'vibe' in a sophisticated, 2-3 sentence paragraph. 
+    2. Identify the top 3 'Strengths'—be specific (e.g., instead of "Good battery," say "Exceptional 20-hour battery life even with ANC active").
+    3. Identify the top 3 'Weaknesses'—focus on recurring user complaints or deal-breakers.
+    4. Assign a precise 'Sentiment Score' from 0-100 based on the data.
+
+    OUTPUT FORMAT (STRICT JSON ONLY):
     {{
-        "score": 0-100,
-        "vibe": "One sentence summary",
-        "pros": ["pro1", "pro2"],
-        "cons": ["con1", "con2"]
+        "score": 85,
+        "vibe": "Detailed 2-3 sentence analysis here...",
+        "pros": ["Detailed strength 1", "Detailed strength 2", "Detailed strength 3"],
+        "cons": ["Detailed weakness 1", "Detailed weakness 2", "Detailed weakness 3"]
     }}
     """
     
