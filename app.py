@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import time
 import requests
 import streamlit as st
@@ -11,22 +10,21 @@ import plotly.graph_objects as go
 # ─── 1. CONFIGURATION ────────────────────────────────────────
 load_dotenv()
 
-# Fetch keys from Streamlit Secrets or local .env
+# Securely fetch keys from Streamlit Secrets or Local .env
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 # ─── 2. CORE LOGIC ───────────────────────────────────────────
 
 def get_reviews_data(product_name):
-    """Fetches text data using Serper API."""
+    """Fetches text data using Serper API (Browserless)."""
     if not SERPER_API_KEY:
         st.error("Serper API Key missing!")
         return None
 
     url = "https://google.serper.dev/search"
-    # Specific query to get high-quality review data
     payload = {
-        "q": f"{product_name} detailed user reviews pros and cons amazon reddit",
+        "q": f"{product_name} user reviews pros cons reddit amazon",
         "num": 10,
         "gl": "us",
         "autocorrect": True
@@ -48,28 +46,24 @@ def get_reviews_data(product_name):
             return None
 
         for item in organic:
-            title = item.get('title', '')
             snippet = item.get('snippet', '')
-            combined_text += f"\nSource: {title}\nReview Snippet: {snippet}\n"
+            combined_text += f"{snippet} "
             
-        return combined_text
+        return combined_text.strip()
     except Exception as e:
         st.error(f"Search API Error: {e}")
         return None
 
 def analyze_sentiment(review_text, product_name):
+    """Uses Gemini 1.5 Flash with Retry Logic for Quota Errors."""
     if not GEMINI_API_KEY:
         st.error("Gemini API Key missing!")
         return None
 
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # Updated for 2026 Stable API
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-    except Exception:
-        # Fallback to the auto-updating alias if the specific version is busy
-        model = genai.GenerativeModel('gemini-flash-latest')
+    # Using the most stable 2026 model name
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -78,24 +72,38 @@ def analyze_sentiment(review_text, product_name):
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
 
-    prompt = f"Analyze sentiment for {product_name}: {review_text}. Return ONLY JSON."
-
-    max_retries = 3
-    for attempt in range(max_retries):
+    prompt = f"""
+    Analyze product sentiment for '{product_name}' using this text:
+    {review_text}
+    
+    Return ONLY a valid JSON object:
+    {{
+        "score": 0-100,
+        "vibe": "One sentence summary",
+        "pros": ["pro1", "pro2"],
+        "cons": ["con1", "con2"]
+    }}
+    """
+    
+    # Retry Loop for 429 Quota Errors
+    for attempt in range(3):
         try:
             response = model.generate_content(
                 prompt,
                 safety_settings=safety_settings,
                 generation_config={"response_mime_type": "application/json"}
             )
-            return json.loads(response.text)
-        
+            if response and response.text:
+                return json.loads(response.text)
         except Exception as e:
             if "429" in str(e):
-                time.sleep((attempt + 1) * 10)
+                wait = (attempt + 1) * 15 # Wait 15s, then 30s
+                st.warning(f"Quota busy. Retrying in {wait}s...")
+                time.sleep(wait)
                 continue
             st.error(f"AI Error: {e}")
-            return None
+            break
+    return None
 
 # ─── 3. UI HELPERS ────────────────────────────────────────────
 
@@ -124,9 +132,10 @@ def build_gauge(score):
 
 st.set_page_config(page_title="Vibe Check", page_icon="🛡️")
 
+# Custom Dark Mode Styling
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap');
     html, body, [data-testid="stAppViewContainer"] { background: #0b0e1a !important; font-family: 'IBM Plex Sans', sans-serif; }
     .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
     h1, h2, h3, p, span, label { color: white !important; }
@@ -136,28 +145,27 @@ st.markdown("""
 <div class="app-header">Vibe<em>Check</em></div>
 """, unsafe_allow_html=True)
 
-product_query = st.text_input("Product Name", placeholder="e.g. Sony WH-1000XM5")
+product_query = st.text_input("What product are we checking?", placeholder="e.g. iPhone 17 Pro")
 analyze_btn = st.button("Run Intelligence Check →")
 
 if analyze_btn and product_query:
-    status_container = st.empty()
-    
-    status_container.info("🕵️ Scouring the web...")
-    data = get_reviews_data(product_query)
+    with st.spinner("🕵️ Scouring the web..."):
+        data = get_reviews_data(product_query)
     
     if data:
         st.write(f"📊 Signal Strength: {len(data)} characters found.")
         
-        status_container.info("🤖 Quantifying sentiment...")
-        analysis = analyze_sentiment(data, product_query)
+        with st.spinner("🤖 Quantifying sentiment..."):
+            analysis = analyze_sentiment(data, product_query)
         
         if analysis:
-            status_container.empty()
-            score = analysis.get('score', 50)
+            score = analysis.get('score', 0)
             label, color = score_to_label(score)
             
+            # Display Gauge
             st.plotly_chart(build_gauge(score), width='stretch')
             
+            # Summary Card
             st.markdown(f"""
             <div class="card">
                 <h2 style="color:{color} !important; margin-top:0;">{label}</h2>
@@ -165,6 +173,7 @@ if analyze_btn and product_query:
             </div>
             """, unsafe_allow_html=True)
             
+            # Pros/Cons
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("### ✅ Strengths")
@@ -172,5 +181,7 @@ if analyze_btn and product_query:
             with col2:
                 st.markdown("### ❌ Weaknesses")
                 for c in analysis.get('cons', []): st.write(f"▼ {c}")
+        else:
+            st.warning("⚠️ AI analysis failed. This is usually due to API limits. Try again in 60 seconds.")
     else:
-        status_container.error("No search data found. Check your Serper API Key.")
+        st.error("No search data found. Check your Serper API Key.")
