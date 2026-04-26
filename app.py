@@ -1,33 +1,35 @@
 import os
 import json
 import re
+import time
 import requests
 import streamlit as st
 from dotenv import load_dotenv
 import google.generativeai as genai
 import plotly.graph_objects as go
 
-# ─── 1. CONFIGURATION & KEYS ──────────────────────────────────
+# ─── 1. CONFIGURATION ────────────────────────────────────────
 load_dotenv()
 
-# Securely fetch keys from Streamlit Secrets or Local .env
+# Fetch keys from Streamlit Secrets or local .env
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-# ─── 2. CORE LOGIC ────────────────────────────────────────────
+# ─── 2. CORE LOGIC ───────────────────────────────────────────
 
 def get_reviews_data(product_name):
-    """Fetches text data using Serper API (Browserless)."""
+    """Fetches text data using Serper API."""
     if not SERPER_API_KEY:
         st.error("Serper API Key missing!")
         return None
 
     url = "https://google.serper.dev/search"
+    # Specific query to get high-quality review data
     payload = {
-    "q": f"{product_name} detailed user reviews pros and cons amazon reddit", # More specific
-    "num": 10, # Increase results
-    "gl": "us",
-    "autocorrect": True
+        "q": f"{product_name} detailed user reviews pros and cons amazon reddit",
+        "num": 10,
+        "gl": "us",
+        "autocorrect": True
     }
     headers = {
         'X-API-KEY': SERPER_API_KEY,
@@ -35,7 +37,7 @@ def get_reviews_data(product_name):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         response.raise_for_status()
         results = response.json()
         
@@ -56,20 +58,15 @@ def get_reviews_data(product_name):
         return None
 
 def analyze_sentiment(review_text, product_name):
-    
+    """Uses Gemini 1.5 Flash with Retry Logic for Quota Errors."""
     if not GEMINI_API_KEY:
         st.error("Gemini API Key missing!")
         return None
 
     genai.configure(api_key=GEMINI_API_KEY)
-    
-    # Using the 2.0 model which is standard in 2026
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-    except:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+    # Using 1.5-flash as it has a more stable free-tier quota on Streamlit
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # Safety settings to prevent "Blocked" errors from spicy reviews
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -90,17 +87,29 @@ def analyze_sentiment(review_text, product_name):
     }}
     """
     
-    try:
-        response = model.generate_content(
-            prompt,
-            safety_settings=safety_settings,
-            generation_config={"response_mime_type": "application/json"}
-        )
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(
+                prompt,
+                safety_settings=safety_settings,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            return json.loads(response.text)
         
-        return json.loads(response.text)
-    except Exception as e:
-        st.error(f"AI Analysis Error: {e}")
-        return None
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 12 # 12s, 24s...
+                    st.warning(f"Quota busy. Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error("Quota fully exhausted for now. Please wait a few minutes.")
+            else:
+                st.error(f"AI Error: {err_str}")
+            return None
 
 # ─── 3. UI HELPERS ────────────────────────────────────────────
 
@@ -129,7 +138,6 @@ def build_gauge(score):
 
 st.set_page_config(page_title="Vibe Check", page_icon="🛡️")
 
-# Custom CSS for the dark "VibeCheck" look
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&display=swap');
@@ -146,29 +154,24 @@ product_query = st.text_input("Product Name", placeholder="e.g. Sony WH-1000XM5"
 analyze_btn = st.button("Run Intelligence Check →")
 
 if analyze_btn and product_query:
-    # Use a clear container for status
     status_container = st.empty()
     
     status_container.info("🕵️ Scouring the web...")
     data = get_reviews_data(product_query)
     
     if data:
-        # Show debug info to verify data flow
         st.write(f"📊 Signal Strength: {len(data)} characters found.")
         
         status_container.info("🤖 Quantifying sentiment...")
         analysis = analyze_sentiment(data, product_query)
         
         if analysis:
-            status_container.empty() # Clear status
-            
+            status_container.empty()
             score = analysis.get('score', 50)
             label, color = score_to_label(score)
             
-            # Display Gauge
             st.plotly_chart(build_gauge(score), width='stretch')
             
-            # Display Summary Card
             st.markdown(f"""
             <div class="card">
                 <h2 style="color:{color} !important; margin-top:0;">{label}</h2>
@@ -176,7 +179,6 @@ if analyze_btn and product_query:
             </div>
             """, unsafe_allow_html=True)
             
-            # Display Pros/Cons
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("### ✅ Strengths")
