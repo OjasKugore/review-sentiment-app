@@ -24,10 +24,10 @@ def get_reviews_data(product_name):
 
     url = "https://google.serper.dev/search"
     payload = {
-        "q": f"{product_name} user reviews pros cons reddit amazon",
-        "num": 8,
-        "gl": "us",
-        "autocorrect": True
+    "q": f"{product_name} detailed user reviews pros and cons amazon reddit", # More specific
+    "num": 10, # Increase results
+    "gl": "us",
+    "autocorrect": True
     }
     headers = {
         'X-API-KEY': SERPER_API_KEY,
