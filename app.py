@@ -146,60 +146,80 @@ def build_gauge(score):
 
 
 def build_radar(pros, cons):
-    def clip(s, n=30): return s[:n] + "…" if len(s) > n else s
-    cats     = [clip(p) for p in pros] + [clip(c) for c in cons]
-    pro_vals = [90, 80, 70, 0, 0, 0]
-    con_vals = [0,  0,  0, 65, 72, 58]
-    fig = go.Figure()
+    from plotly.subplots import make_subplots
+    def clip(s, n=26): return s[:n] + "…" if len(s) > n else s
+
+    pro_cats  = [clip(p) for p in pros]
+    con_cats  = [clip(c) for c in cons]
+    pro_vals  = [90, 80, 70]
+    con_vals  = [65, 72, 58]
+
+    polar_style = dict(
+        radialaxis=dict(
+            visible=True, range=[0, 100],
+            gridcolor='rgba(255,255,255,0.07)',
+            tickvals=[25, 50, 75],
+            tickfont=dict(color='rgba(255,255,255,0.18)', size=8, family='DM Mono'),
+        ),
+        angularaxis=dict(
+            gridcolor='rgba(255,255,255,0.07)',
+            tickfont=dict(color='rgba(255,255,255,0.65)', size=11, family='Plus Jakarta Sans'),
+            linecolor='rgba(255,255,255,0.06)',
+        ),
+        bgcolor='rgba(255,255,255,0.02)',
+    )
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "polar"}, {"type": "polar"}]],
+        subplot_titles=["▲  Strengths", "▼  Weaknesses"],
+    )
+
+    # Left — strengths only on their own 3 axes
     fig.add_trace(go.Scatterpolar(
-        r=pro_vals + [pro_vals[0]], theta=cats + [cats[0]],
+        r=pro_vals + [pro_vals[0]],
+        theta=pro_cats + [pro_cats[0]],
         fill='toself', name='Strengths',
         line=dict(color='#22c98a', width=2.5),
-        fillcolor='rgba(34,201,138,0.12)',
+        fillcolor='rgba(34,201,138,0.14)',
         marker=dict(size=7, color='#22c98a'),
-    ))
+    ), row=1, col=1)
+
+    # Right — weaknesses only on their own 3 axes
     fig.add_trace(go.Scatterpolar(
-        r=con_vals + [con_vals[0]], theta=cats + [cats[0]],
+        r=con_vals + [con_vals[0]],
+        theta=con_cats + [con_cats[0]],
         fill='toself', name='Weaknesses',
         line=dict(color='#e85d5d', width=2.5),
-        fillcolor='rgba(232,93,93,0.12)',
+        fillcolor='rgba(232,93,93,0.14)',
         marker=dict(size=7, color='#e85d5d'),
-    ))
+    ), row=1, col=2)
+
     fig.update_layout(
-        polar=dict(
-            bgcolor='rgba(255,255,255,0.02)',
-            radialaxis=dict(
-                visible=True, range=[0, 100],
-                gridcolor='rgba(255,255,255,0.07)',
-                tickvals=[25, 50, 75],
-                tickfont=dict(color='rgba(255,255,255,0.2)', size=9, family='DM Mono'),
-                linecolor='rgba(255,255,255,0.04)',
-            ),
-            angularaxis=dict(
-                gridcolor='rgba(255,255,255,0.07)',
-                tickfont=dict(color='rgba(255,255,255,0.65)', size=12, family='Plus Jakarta Sans'),
-                linecolor='rgba(255,255,255,0.07)',
-            ),
-        ),
+        polar=dict(**polar_style),
+        polar2=dict(**polar_style),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        legend=dict(
-            font=dict(color='rgba(255,255,255,0.5)', size=12, family='Plus Jakarta Sans'),
-            bgcolor='rgba(255,255,255,0.04)',
-            bordercolor='rgba(255,255,255,0.08)', borderwidth=1,
-            x=0.5, xanchor='center', y=-0.1, orientation='h',
-        ),
-        margin=dict(t=20, b=70, l=80, r=80),
-        height=460,
+        showlegend=False,
+        margin=dict(t=48, b=24, l=40, r=40),
+        height=400,
     )
+    # Style subplot title font
+    for ann in fig.layout.annotations:
+        ann.font = dict(color='rgba(255,255,255,0.35)', size=11, family='DM Mono')
+
     return fig
 
 
 def build_diverging_bar(pros, cons):
     def clip(s, n=38): return s[:n] + "…" if len(s) > n else s
-    labels = [clip(p) for p in pros] + [clip(c) for c in cons]
-    values = [90, 80, 70, -65, -72, -58]
+
+    # Cons at bottom (plotly renders first item at bottom), pros at top
+    # So order list: cons first, then pros — they'll appear pros on top, cons below
+    labels = [clip(c) for c in reversed(cons)] + [clip(p) for p in reversed(pros)]
+    values = [-65, -72, -58, 90, 80, 70]
     colors = ['rgba(34,201,138,0.78)' if v > 0 else 'rgba(232,93,93,0.78)' for v in values]
     border = ['rgba(34,201,138,0.4)'  if v > 0 else 'rgba(232,93,93,0.4)'  for v in values]
+
     fig = go.Figure(go.Bar(
         x=values, y=labels, orientation='h',
         marker=dict(color=colors, line=dict(color=border, width=1)),
@@ -209,7 +229,21 @@ def build_diverging_bar(pros, cons):
         hovertemplate='%{y}<extra></extra>',
         width=0.5,
     ))
+
+    # Centre divider line
     fig.add_vline(x=0, line_color='rgba(255,255,255,0.18)', line_width=1.5)
+
+    # Subtle separator between pros and cons zones
+    fig.add_hline(y=2.5, line_color='rgba(255,255,255,0.07)', line_width=1, line_dash='dot')
+
+    # Section annotations
+    fig.add_annotation(x=-135, y=5.3, text="STRENGTHS", showarrow=False,
+                       font=dict(color='rgba(34,201,138,0.45)', size=9, family='DM Mono'),
+                       xanchor='left')
+    fig.add_annotation(x=-135, y=2.2, text="WEAKNESSES", showarrow=False,
+                       font=dict(color='rgba(232,93,93,0.45)', size=9, family='DM Mono'),
+                       xanchor='left')
+
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-140, 140]),
@@ -218,8 +252,8 @@ def build_diverging_bar(pros, cons):
             tickfont=dict(color='rgba(255,255,255,0.7)', size=12, family='Plus Jakarta Sans'),
             automargin=True,
         ),
-        margin=dict(t=16, b=20, l=12, r=80),
-        height=340, bargap=0.44,
+        margin=dict(t=28, b=20, l=12, r=80),
+        height=360, bargap=0.44,
     )
     return fig
 
@@ -363,14 +397,18 @@ section.main > div { padding-top: 2rem; max-width: 900px; margin: auto; }
 .score-badge {
     display: inline-block;
     font-family: 'DM Mono', monospace !important;
-    font-size: 0.68rem;
+    font-size: 0.6rem;
     font-weight: 500;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     border-radius: 20px;
-    padding: 0.28rem 0.8rem;
+    padding: 0.28rem 0.75rem;
     margin-top: 0.6rem;
     border: 1px solid;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── Verdict quote ── */
