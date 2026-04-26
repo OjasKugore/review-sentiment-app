@@ -10,72 +10,53 @@ import plotly.graph_objects as go
 # ─── 1. CONFIGURATION ────────────────────────────────────────
 load_dotenv()
 
-# Securely fetch keys from Streamlit Secrets or Local .env
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-# ─── 2. CORE LOGIC ───────────────────────────────────────────
+# ─── 2. CORE LOGIC (UNCHANGED) ───────────────────────────────
 
 def get_reviews_data(product_name):
-    """Fetches text data using Serper API (Browserless)."""
     if not SERPER_API_KEY:
         st.error("Serper API Key missing!")
         return None
-
     url = "https://google.serper.dev/search"
     payload = {
         "q": f"{product_name} user reviews pros cons reddit amazon",
-        "num": 10,
-        "gl": "us",
-        "autocorrect": True
+        "num": 10, "gl": "us", "autocorrect": True
     }
-    headers = {
-        'X-API-KEY': SERPER_API_KEY,
-        'Content-Type': 'application/json'
-    }
-    
+    headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
         response.raise_for_status()
         results = response.json()
-        
         combined_text = ""
         organic = results.get('organic', [])
-        
         if not organic:
             return None
-
         for item in organic:
             snippet = item.get('snippet', '')
             combined_text += f"{snippet} "
-            
         return combined_text.strip()
     except Exception as e:
         st.error(f"Search API Error: {e}")
         return None
 
+
 def analyze_sentiment(review_text, product_name):
-    """Uses Gemini 1.5 Flash with Retry Logic for Quota Errors."""
     if not GEMINI_API_KEY:
         st.error("Gemini API Key missing!")
         return None
-
     genai.configure(api_key=GEMINI_API_KEY)
-    
     try:
-        # This is the current workhorse model
         model = genai.GenerativeModel('gemini-2.5-flash')
     except:
-        # Fallback to the 'latest' alias which Google auto-updates
         model = genai.GenerativeModel('gemini-flash-latest')
-
     safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
-
     prompt = f"""
     ROLE: You are a Senior Product Strategist and Market Analyst.
     TASK: Provide a deep-dive sentiment analysis for '{product_name}' based on the following web data:
@@ -97,8 +78,6 @@ def analyze_sentiment(review_text, product_name):
         "cons": ["Detailed weakness 1", "Detailed weakness 2", "Detailed weakness 3"]
     }}
     """
-    
-    # Retry Loop for 429 Quota Errors
     for attempt in range(3):
         try:
             response = model.generate_content(
@@ -110,91 +89,638 @@ def analyze_sentiment(review_text, product_name):
                 return json.loads(response.text)
         except Exception as e:
             if "429" in str(e):
-                wait = (attempt + 1) * 15 # Wait 15s, then 30s
-                st.warning(f"Quota busy. Retrying in {wait}s...")
+                wait = (attempt + 1) * 15
+                st.warning(f"Quota busy. Retrying in {wait}s…")
                 time.sleep(wait)
                 continue
             st.error(f"AI Error: {e}")
             break
     return None
 
-# ─── 3. UI HELPERS ────────────────────────────────────────────
+
+# ─── 3. CHART HELPERS ────────────────────────────────────────
 
 def score_to_label(score):
     if score >= 80: return "Highly Recommended", "#22c98a"
     if score >= 65: return "Worth Buying",        "#5bc8a8"
     if score >= 45: return "Mixed Signals",        "#f0a500"
-    return "Not Recommended", "#e85d5d"
+    return "Not Recommended",                      "#e85d5d"
+
 
 def build_gauge(score):
     _, accent = score_to_label(score)
+    steps = [
+        {"range": [0,  25],  "color": "rgba(232,93,93,0.1)"},
+        {"range": [25, 50],  "color": "rgba(240,165,0,0.1)"},
+        {"range": [50, 75],  "color": "rgba(91,200,168,0.1)"},
+        {"range": [75, 100], "color": "rgba(34,201,138,0.1)"},
+    ]
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
-        number={"font": {"color": accent, "size": 50}},
+        number={
+            "font": {"color": accent, "size": 56, "family": "DM Mono, monospace"},
+            "suffix": ""
+        },
         gauge={
-            "axis": {"range": [0, 100]},
-            "bar": {"color": accent},
-            "bgcolor": "rgba(255,255,255,0.05)"
-        }
+            "axis": {
+                "range": [0, 100],
+                "tickvals": [0, 25, 50, 75, 100],
+                "tickfont": {"color": "rgba(255,255,255,0.25)", "size": 10, "family": "DM Mono"},
+                "tickcolor": "rgba(255,255,255,0.1)",
+            },
+            "bar":      {"color": accent, "thickness": 0.26},
+            "bgcolor":  "rgba(0,0,0,0)",
+            "borderwidth": 0,
+            "steps":    steps,
+            "threshold": {"line": {"color": accent, "width": 2}, "thickness": 0.82, "value": score},
+        },
+        title={"text": "SENTIMENT SCORE",
+               "font": {"color": "rgba(255,255,255,0.25)", "size": 10, "family": "Plus Jakarta Sans"}},
     ))
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", height=250, margin=dict(t=0, b=0))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=40, b=4, l=24, r=24), height=230,
+    )
     return fig
 
-# ─── 4. STREAMLIT UI ──────────────────────────────────────────
 
-st.set_page_config(page_title="Vibe Check", page_icon="🛡️")
+def build_radar(pros, cons):
+    def clip(s, n=30): return s[:n] + "…" if len(s) > n else s
+    cats     = [clip(p) for p in pros] + [clip(c) for c in cons]
+    pro_vals = [90, 80, 70, 0, 0, 0]
+    con_vals = [0,  0,  0, 65, 72, 58]
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=pro_vals + [pro_vals[0]], theta=cats + [cats[0]],
+        fill='toself', name='Strengths',
+        line=dict(color='#22c98a', width=2.5),
+        fillcolor='rgba(34,201,138,0.12)',
+        marker=dict(size=7, color='#22c98a'),
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=con_vals + [con_vals[0]], theta=cats + [cats[0]],
+        fill='toself', name='Weaknesses',
+        line=dict(color='#e85d5d', width=2.5),
+        fillcolor='rgba(232,93,93,0.12)',
+        marker=dict(size=7, color='#e85d5d'),
+    ))
+    fig.update_layout(
+        polar=dict(
+            bgcolor='rgba(255,255,255,0.02)',
+            radialaxis=dict(
+                visible=True, range=[0, 100],
+                gridcolor='rgba(255,255,255,0.07)',
+                tickvals=[25, 50, 75],
+                tickfont=dict(color='rgba(255,255,255,0.2)', size=9, family='DM Mono'),
+                linecolor='rgba(255,255,255,0.04)',
+            ),
+            angularaxis=dict(
+                gridcolor='rgba(255,255,255,0.07)',
+                tickfont=dict(color='rgba(255,255,255,0.65)', size=12, family='Plus Jakarta Sans'),
+                linecolor='rgba(255,255,255,0.07)',
+            ),
+        ),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(
+            font=dict(color='rgba(255,255,255,0.5)', size=12, family='Plus Jakarta Sans'),
+            bgcolor='rgba(255,255,255,0.04)',
+            bordercolor='rgba(255,255,255,0.08)', borderwidth=1,
+            x=0.5, xanchor='center', y=-0.1, orientation='h',
+        ),
+        margin=dict(t=20, b=70, l=80, r=80),
+        height=460,
+    )
+    return fig
 
-# Custom Dark Mode Styling
-st.markdown("""
+
+def build_diverging_bar(pros, cons):
+    def clip(s, n=38): return s[:n] + "…" if len(s) > n else s
+    labels = [clip(p) for p in pros] + [clip(c) for c in cons]
+    values = [90, 80, 70, -65, -72, -58]
+    colors = ['rgba(34,201,138,0.78)' if v > 0 else 'rgba(232,93,93,0.78)' for v in values]
+    border = ['rgba(34,201,138,0.4)'  if v > 0 else 'rgba(232,93,93,0.4)'  for v in values]
+    fig = go.Figure(go.Bar(
+        x=values, y=labels, orientation='h',
+        marker=dict(color=colors, line=dict(color=border, width=1)),
+        text=[f"+{v}" if v > 0 else str(v) for v in values],
+        textposition='outside',
+        textfont=dict(color='rgba(255,255,255,0.4)', size=11, family='DM Mono'),
+        hovertemplate='%{y}<extra></extra>',
+        width=0.5,
+    ))
+    fig.add_vline(x=0, line_color='rgba(255,255,255,0.18)', line_width=1.5)
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-140, 140]),
+        yaxis=dict(
+            gridcolor='rgba(255,255,255,0.04)',
+            tickfont=dict(color='rgba(255,255,255,0.7)', size=12, family='Plus Jakarta Sans'),
+            automargin=True,
+        ),
+        margin=dict(t=16, b=20, l=12, r=80),
+        height=340, bargap=0.44,
+    )
+    return fig
+
+
+# ─── 4. CSS ──────────────────────────────────────────────────
+
+CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap');
-    html, body, [data-testid="stAppViewContainer"] { background: #0b0e1a !important; font-family: 'IBM Plex Sans', sans-serif; }
-    .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-    h1, h2, h3, p, span, label { color: white !important; }
-    .app-header { font-size: 2.5rem; font-weight: 700; border-bottom: 2px solid #f0a500; margin-bottom: 2rem; }
-    .app-header em { color: #f0a500; font-style: italic; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
+
+/* ── Reset ── */
+html, body, [data-testid="stAppViewContainer"] {
+    background: #080c18 !important;
+}
+[data-testid="stHeader"],
+[data-testid="stDecoration"],
+[data-testid="stSidebar"],
+#MainMenu, footer { display: none !important; }
+
+/* ── Noise texture overlay ── */
+[data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+}
+
+/* ── Ambient colour blobs ── */
+[data-testid="stAppViewContainer"]::after {
+    content: "";
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+        radial-gradient(ellipse 60% 50% at 8%   18%,  rgba(240,165,0,0.14)  0%, transparent 60%),
+        radial-gradient(ellipse 50% 45% at 90%  78%,  rgba(34,201,138,0.12) 0%, transparent 58%),
+        radial-gradient(ellipse 35% 30% at 52%  50%,  rgba(60,40,120,0.1)   0%, transparent 55%);
+}
+
+/* ── Global type ── */
+*, p, div, span, label {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    color: rgba(255,255,255,0.82);
+    box-sizing: border-box;
+}
+section.main > div { padding-top: 2rem; max-width: 900px; margin: auto; }
+
+/* ── Wordmark ── */
+.wm-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 1.1rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 1px solid rgba(240,165,0,0.2);
+    margin-bottom: 0.4rem;
+}
+.wm-logo {
+    font-family: 'Instrument Serif', Georgia, serif !important;
+    font-size: 2.8rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: #fff !important;
+}
+.wm-logo em {
+    font-style: italic;
+    color: #f0a500 !important;
+}
+.wm-sub {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.68rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.25) !important;
+    padding-bottom: 0.2rem;
+}
+
+/* ── Section markers ── */
+.sec-row {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin: 2.2rem 0 1rem;
+}
+.sec-num {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: #f0a500 !important;
+    border: 1px solid rgba(240,165,0,0.35);
+    border-radius: 5px;
+    padding: 0.18rem 0.48rem;
+    white-space: nowrap;
+}
+.sec-label {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3) !important;
+}
+.sec-rule { flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
+
+/* ── Glass card ── */
+.gc {
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 1.6rem 1.8rem;
+    margin-bottom: 1rem;
+    box-shadow:
+        0 6px 28px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+    position: relative;
+}
+.gc-amber { border-left: 3px solid rgba(240,165,0,0.6); }
+.gc-green { border-left: 3px solid rgba(34,201,138,0.6); }
+.gc-red   { border-left: 3px solid rgba(232,93,93,0.6); }
+.gc-warn  { border-left: 3px solid rgba(240,165,0,0.6);
+             background: rgba(240,165,0,0.06); }
+.gc-err   { border-left: 3px solid rgba(232,93,93,0.6);
+             background: rgba(232,93,93,0.06); }
+
+/* ── Score block ── */
+.score-num {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 6rem;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.04em;
+}
+.score-denom {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 1.1rem;
+    color: rgba(255,255,255,0.2) !important;
+    vertical-align: super; margin-left: 4px;
+}
+.score-badge {
+    display: inline-block;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-radius: 20px;
+    padding: 0.28rem 0.8rem;
+    margin-top: 0.6rem;
+    border: 1px solid;
+}
+
+/* ── Verdict quote ── */
+.verdict-quote {
+    font-family: 'Instrument Serif', Georgia, serif !important;
+    font-size: 1.12rem;
+    font-style: italic;
+    font-weight: 400;
+    line-height: 1.7;
+    color: rgba(255,255,255,0.78) !important;
+    border-left: 2px solid rgba(240,165,0,0.45);
+    padding-left: 1rem;
+    margin: 1rem 0 0.8rem;
+}
+
+/* ── Product pill ── */
+.prod-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(240,165,0,0.1);
+    border: 1px solid rgba(240,165,0,0.25);
+    border-radius: 20px;
+    padding: 0.26rem 0.85rem;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.75rem;
+    color: rgba(255,215,120,0.85) !important;
+}
+
+/* ── Micro label ── */
+.micro {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.24) !important;
+    margin-bottom: 0.45rem;
+    display: block;
+}
+
+/* ── Pro / Con item ── */
+.pci {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 11px;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.48;
+}
+.pci-pro {
+    background: rgba(34,201,138,0.07);
+    border: 1px solid rgba(34,201,138,0.16);
+}
+.pci-con {
+    background: rgba(232,93,93,0.07);
+    border: 1px solid rgba(232,93,93,0.16);
+}
+.pci-pro .dot { color: #22c98a !important; font-size: 0.8rem; margin-top: 0.15rem; flex-shrink: 0; }
+.pci-con .dot { color: #e85d5d !important; font-size: 0.8rem; margin-top: 0.15rem; flex-shrink: 0; }
+
+/* ── Chart caption ── */
+.ch-cap {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.25) !important;
+    font-style: italic;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.2rem;
+    display: block;
+}
+
+/* ── Data callout strip ── */
+.data-strip {
+    display: flex;
+    gap: 1.2rem;
+    margin-top: 1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
+}
+.data-cell { flex: 1; }
+.data-val {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 1.5rem;
+    font-weight: 400;
+    color: #fff !important;
+    line-height: 1;
+}
+.data-key {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.62rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.28) !important;
+    margin-top: 0.25rem;
+    display: block;
+}
+
+/* ── Streamlit plotly chart as glass card ── */
+[data-testid="stPlotlyChart"] {
+    background: rgba(255,255,255,0.04) !important;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 18px !important;
+    padding: 1rem 0.5rem 0.3rem !important;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.28),
+                inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ── Input ── */
+[data-testid="stTextInput"] input {
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 12px !important;
+    color: white !important;
+    padding: 0.85rem 1.1rem !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-size: 0.96rem !important;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+[data-testid="stTextInput"] input::placeholder { color: rgba(255,255,255,0.2) !important; }
+[data-testid="stTextInput"] input:focus {
+    border-color: rgba(240,165,0,0.5) !important;
+    box-shadow: 0 0 0 3px rgba(240,165,0,0.1) !important;
+    outline: none !important;
+}
+[data-testid="stTextInput"] label {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 0.66rem !important;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.32) !important;
+}
+
+/* ── Button ── */
+[data-testid="stButton"] > button {
+    background: linear-gradient(135deg, #f0a500 0%, #d97b2a 100%) !important;
+    color: #080c18 !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 0.82rem 2.2rem !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 0.88rem !important;
+    letter-spacing: 0.03em !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 4px 20px rgba(240,165,0,0.3) !important;
+}
+[data-testid="stButton"] > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 7px 28px rgba(240,165,0,0.45) !important;
+}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] p {
+    font-family: 'DM Mono', monospace !important;
+    color: rgba(255,255,255,0.32) !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Warning / error overrides ── */
+[data-testid="stAlert"] {
+    background: rgba(240,165,0,0.06) !important;
+    border: 1px solid rgba(240,165,0,0.2) !important;
+    border-radius: 12px !important;
+}
+
+.js-plotly-plot .plotly,
+.js-plotly-plot .plotly .plot-container { background: transparent !important; }
 </style>
-<div class="app-header">Vibe<em>Check</em></div>
+"""
+
+# ─── 5. PAGE SETUP ───────────────────────────────────────────
+
+st.set_page_config(page_title="VibeCheck", page_icon="🛡️", layout="centered")
+st.markdown(CSS, unsafe_allow_html=True)
+
+# ─── WORDMARK ────────────────────────────────────────────────
+
+st.markdown("""
+<div class="wm-wrap">
+    <div class="wm-logo">Vibe<em>Check</em></div>
+    <div class="wm-sub">Product Intelligence Engine</div>
+</div>
 """, unsafe_allow_html=True)
 
-product_query = st.text_input("What product are we checking?", placeholder="e.g. iPhone 17 Pro")
+# ─── INPUT ───────────────────────────────────────────────────
+
+st.markdown('<div style="height:0.3rem"></div>', unsafe_allow_html=True)
+product_query = st.text_input(
+    "Product",
+    placeholder="e.g. iPhone 17 Pro, Sony WH-1000XM5, Dyson V15…",
+    label_visibility="visible"
+)
 analyze_btn = st.button("Run Intelligence Check →")
 
+# ─── MAIN ────────────────────────────────────────────────────
+
 if analyze_btn and product_query:
-    with st.spinner("🕵️ Scouring the web..."):
+
+    with st.spinner("Scouring the web for signals…"):
         data = get_reviews_data(product_query)
-    
+
     if data:
-        st.write(f"📊 Signal Strength: {len(data)} characters found.")
-        
-        with st.spinner("🤖 Quantifying sentiment..."):
+        char_count = len(data)
+
+        with st.spinner("Quantifying sentiment with Gemini…"):
             analysis = analyze_sentiment(data, product_query)
-        
+
         if analysis:
-            score = analysis.get('score', 0)
+            score  = analysis.get('score', 0)
+            vibe   = analysis.get('vibe', '')
+            pros   = analysis.get('pros', [])
+            cons   = analysis.get('cons', [])
             label, color = score_to_label(score)
-            
-            # Display Gauge
-            st.plotly_chart(build_gauge(score), width='stretch')
-            
-            # Summary Card
-            st.markdown(f"""
-            <div class="card">
-                <h2 style="color:{color} !important; margin-top:0;">{label}</h2>
-                <p style="font-size: 1.1rem;">{analysis.get('vibe', '')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Pros/Cons
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### ✅ Strengths")
-                for p in analysis.get('pros', []): st.write(f"▲ {p}")
-            with col2:
-                st.markdown("### ❌ Weaknesses")
-                for c in analysis.get('cons', []): st.write(f"▼ {c}")
+
+            # ══ 01  OVERVIEW ══════════════════════════════
+            st.markdown("""
+            <div class="sec-row">
+                <span class="sec-num">01</span>
+                <span class="sec-label">Overview</span>
+                <div class="sec-rule"></div>
+            </div>""", unsafe_allow_html=True)
+
+            left, right = st.columns([1, 1.7], gap="large")
+
+            with left:
+                st.markdown(f"""
+                <div class="gc gc-amber">
+                    <span class="micro">Sentiment Score</span>
+                    <div>
+                        <span class="score-num" style="color:{color};">{score}</span>
+                        <span class="score-denom">/100</span>
+                    </div>
+                    <div class="score-badge"
+                         style="color:{color}; border-color:{color}40; background:{color}1a;">
+                        {label}
+                    </div>
+                    <div class="data-strip">
+                        <div class="data-cell">
+                            <div class="data-val">{len(pros)}</div>
+                            <span class="data-key">Strengths</span>
+                        </div>
+                        <div class="data-cell">
+                            <div class="data-val">{len(cons)}</div>
+                            <span class="data-key">Weaknesses</span>
+                        </div>
+                        <div class="data-cell">
+                            <div class="data-val">{char_count // 100}k</div>
+                            <span class="data-key">Data chars</span>
+                        </div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+                st.plotly_chart(build_gauge(score), use_container_width=True,
+                                config={"displayModeBar": False})
+
+            with right:
+                st.markdown(f"""
+                <div class="gc" style="height:100%;">
+                    <span class="micro">Product</span>
+                    <div class="prod-pill">📦 {product_query}</div>
+                    <div class="verdict-quote">{vibe}</div>
+                    <div style="font-size:0.72rem; color:rgba(255,255,255,0.2);
+                                font-style:italic; margin-top:0.6rem;">
+                        Synthesised from live web search snippets &amp; community discussions
+                    </div>
+                </div>""", unsafe_allow_html=True)
+
+            # ══ 02  STRENGTHS & WEAKNESSES ════════════════
+            st.markdown("""
+            <div class="sec-row">
+                <span class="sec-num">02</span>
+                <span class="sec-label">Strengths &amp; Weaknesses</span>
+                <div class="sec-rule"></div>
+            </div>""", unsafe_allow_html=True)
+
+            pc, cc = st.columns(2, gap="medium")
+            with pc:
+                pros_html = "".join([
+                    f'<div class="pci pci-pro"><span class="dot">▲</span><span>{p}</span></div>'
+                    for p in pros
+                ])
+                st.markdown(f"""
+                <div class="gc gc-green">
+                    <span class="micro" style="color:#22c98a !important;">What people love</span>
+                    {pros_html}
+                </div>""", unsafe_allow_html=True)
+
+            with cc:
+                cons_html = "".join([
+                    f'<div class="pci pci-con"><span class="dot">▼</span><span>{c}</span></div>'
+                    for c in cons
+                ])
+                st.markdown(f"""
+                <div class="gc gc-red">
+                    <span class="micro" style="color:#e85d5d !important;">Common complaints</span>
+                    {cons_html}
+                </div>""", unsafe_allow_html=True)
+
+            # ══ 03  ATTRIBUTE RADAR ═══════════════════════
+            st.markdown("""
+            <div class="sec-row">
+                <span class="sec-num">03</span>
+                <span class="sec-label">Attribute Radar</span>
+                <div class="sec-rule"></div>
+            </div>""", unsafe_allow_html=True)
+
+            st.markdown('<span class="ch-cap">Relative attribute mapping across reported strengths and weaknesses</span>',
+                        unsafe_allow_html=True)
+            st.plotly_chart(build_radar(pros, cons), use_container_width=True,
+                            config={"displayModeBar": False})
+
+            # ══ 04  SIGNAL STRENGTH ═══════════════════════
+            st.markdown("""
+            <div class="sec-row">
+                <span class="sec-num">04</span>
+                <span class="sec-label">Signal Strength</span>
+                <div class="sec-rule"></div>
+            </div>""", unsafe_allow_html=True)
+
+            st.markdown('<span class="ch-cap">Diverging view — positive signals vs. negative friction points</span>',
+                        unsafe_allow_html=True)
+            st.plotly_chart(build_diverging_bar(pros, cons), use_container_width=True,
+                            config={"displayModeBar": False})
+
+            # ══ FOOTER ════════════════════════════════════
+            st.markdown("""
+            <div style="text-align:center; padding:2rem 0 1rem;
+                        font-family:'DM Mono',monospace; font-size:0.65rem;
+                        color:rgba(255,255,255,0.14); letter-spacing:0.1em;">
+                VIBECHECK · POWERED BY GEMINI AI · LIVE WEB DATA
+            </div>""", unsafe_allow_html=True)
+
         else:
-            st.warning("⚠️ AI analysis failed. This is usually due to API limits. Try again in 60 seconds.")
+            st.markdown("""
+            <div class="gc gc-warn" style="text-align:center; padding:2rem;">
+                <div style="font-size:1.8rem; margin-bottom:0.5rem;">⚠</div>
+                <div style="font-weight:600;">AI analysis failed.</div>
+                <div style="color:rgba(255,255,255,0.35); font-size:0.85rem; margin-top:0.3rem;">
+                    Usually a quota issue. Wait 60 seconds and try again.
+                </div>
+            </div>""", unsafe_allow_html=True)
     else:
-        st.error("No search data found. Check your Serper API Key.")
+        st.markdown("""
+        <div class="gc gc-err" style="text-align:center; padding:2rem;">
+            <div style="font-size:1.8rem; margin-bottom:0.5rem;">✕</div>
+            <div style="font-weight:600;">No search data found.</div>
+            <div style="color:rgba(255,255,255,0.35); font-size:0.85rem; margin-top:0.3rem;">
+                Check your Serper API key and try a different product name.
+            </div>
+        </div>""", unsafe_allow_html=True)
