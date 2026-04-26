@@ -62,8 +62,12 @@ def analyze_sentiment(review_text, product_name):
 
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # Using the most stable 2026 model name
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    try:
+        # This is the current workhorse model
+        model = genai.GenerativeModel('gemini-2.5-flash')
+    except:
+        # Fallback to the 'latest' alias which Google auto-updates
+        model = genai.GenerativeModel('gemini-flash-latest')
 
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
